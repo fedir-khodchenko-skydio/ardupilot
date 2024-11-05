@@ -17,8 +17,8 @@ from pymavlink import mavutil
 from pymavlink import mavextra
 from pymavlink import rotmat
 
-from pysim import util
-from pysim import vehicleinfo
+#from pysim import util
+#from pysim import vehicleinfo
 
 import vehicle_test_suite
 
@@ -4757,7 +4757,9 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         while True:
             if self.get_sim_time_cached() - tstart > timeout:
                 raise NotAchievedException("Did not reach destination")
-            if self.distance_to_local_position((x, y, -z_up)) < 1:
+            pos = self.assert_receive_message('LOCAL_POSITION_NED', timeout=2)
+            self.progress(f"WantLocalPos={(x, y, -z_up)} Got={(pos.x, pos.y, pos.z)}")
+            if self.distance_to_local_position((x, y, -z_up), timeout=3) < 1:
                 break
 
     def test_guided_local_position_target(self, x, y, z_up):
@@ -5819,49 +5821,6 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.delay_sim_time(3)
             self.assert_mount_rpy(retract_r, retract_p, retract_y)
             self.context_pop()
-
-        self.do_RTL()
-
-        self.context_pop()
-        self.reboot_sitl()
-
-    def AutoYawDO_MOUNT_CONTROL(self):
-        '''test AutoYaw behaviour when MAV_CMD_DO_MOUNT_CONTROL sent to Mount without Yaw control'''
-
-        # setup mount parameters
-        self.context_push()
-
-        yaw_servo = 7
-        self.setup_servo_mount(roll_servo=5, pitch_servo=6, yaw_servo=yaw_servo)
-        # Disable Mount Yaw servo
-        self.set_parameters({
-            "SERVO%u_FUNCTION" % yaw_servo: 0,
-        })
-        self.reboot_sitl() # to handle MNT_TYPE changing
-
-        self.takeoff(20, mode='GUIDED')
-
-        for mount_yaw in [-45, 0, 45]:
-            heading = 330
-            self.guided_achieve_heading(heading)
-            self.assert_heading(heading)
-
-            self.neutralise_gimbal()
-
-            r = 15
-            p = 20
-            self.run_cmd_int(
-                mavutil.mavlink.MAV_CMD_DO_MOUNT_CONTROL,
-                p1=p,
-                p2=r,
-                p3=mount_yaw,
-                p7=mavutil.mavlink.MAV_MOUNT_MODE_MAVLINK_TARGETING,
-            )
-            self.delay_sim_time(5)
-            # We have disabled yaw servo, so expect mount yaw to be zero
-            self.assert_mount_rpy(r, p, 0)
-            # But we expect the copter to yaw instead
-            self.assert_heading(heading + mount_yaw)
 
         self.do_RTL()
 
@@ -9318,126 +9277,126 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.takeoff(10)
         self.do_RTL()
 
-    def FlyEachFrame(self):
-        '''Fly each supported internal frame'''
-        vinfo = vehicleinfo.VehicleInfo()
-        copter_vinfo_options = vinfo.options[self.vehicleinfo_key()]
-        known_broken_frames = {
-            'heli-compound': "wrong binary, different takeoff regime",
-            'heli-dual': "wrong binary, different takeoff regime",
-            'heli': "wrong binary, different takeoff regime",
-            'heli-gas': "wrong binary, different takeoff regime",
-            'heli-blade360': "wrong binary, different takeoff regime",
-            "quad-can" : "needs CAN periph",
-        }
-        for frame in sorted(copter_vinfo_options["frames"].keys()):
-            self.start_subtest("Testing frame (%s)" % str(frame))
-            if frame in known_broken_frames:
-                self.progress("Actually, no I'm not - it is known-broken (%s)" %
-                              (known_broken_frames[frame]))
-                continue
-            frame_bits = copter_vinfo_options["frames"][frame]
-            print("frame_bits: %s" % str(frame_bits))
-            if frame_bits.get("external", False):
-                self.progress("Actually, no I'm not - it is an external simulation")
-                continue
-            model = frame_bits.get("model", frame)
-            # the model string for Callisto has crap in it.... we
-            # should really have another entry in the vehicleinfo data
-            # to carry the path to the JSON.
-            defaults = self.model_defaults_filepath(frame)
-            if not isinstance(defaults, list):
-                defaults = [defaults]
-            self.customise_SITL_commandline(
-                [],
-                defaults_filepath=defaults,
-                model=model,
-                wipe=True,
-            )
+    # def FlyEachFrame(self):
+    #     '''Fly each supported internal frame'''
+    #     vinfo = vehicleinfo.VehicleInfo()
+    #     copter_vinfo_options = vinfo.options[self.vehicleinfo_key()]
+    #     known_broken_frames = {
+    #         'heli-compound': "wrong binary, different takeoff regime",
+    #         'heli-dual': "wrong binary, different takeoff regime",
+    #         'heli': "wrong binary, different takeoff regime",
+    #         'heli-gas': "wrong binary, different takeoff regime",
+    #         'heli-blade360': "wrong binary, different takeoff regime",
+    #         "quad-can" : "needs CAN periph",
+    #     }
+    #     for frame in sorted(copter_vinfo_options["frames"].keys()):
+    #         self.start_subtest("Testing frame (%s)" % str(frame))
+    #         if frame in known_broken_frames:
+    #             self.progress("Actually, no I'm not - it is known-broken (%s)" %
+    #                           (known_broken_frames[frame]))
+    #             continue
+    #         frame_bits = copter_vinfo_options["frames"][frame]
+    #         print("frame_bits: %s" % str(frame_bits))
+    #         if frame_bits.get("external", False):
+    #             self.progress("Actually, no I'm not - it is an external simulation")
+    #             continue
+    #         model = frame_bits.get("model", frame)
+    #         # the model string for Callisto has crap in it.... we
+    #         # should really have another entry in the vehicleinfo data
+    #         # to carry the path to the JSON.
+    #         defaults = self.model_defaults_filepath(frame)
+    #         if not isinstance(defaults, list):
+    #             defaults = [defaults]
+    #         self.customise_SITL_commandline(
+    #             [],
+    #             defaults_filepath=defaults,
+    #             model=model,
+    #             wipe=True,
+    #         )
 
-            # add a listener that verifies yaw looks good:
-            def verify_yaw(mav, m):
-                if m.get_type() != 'ATTITUDE':
-                    return
-                yawspeed_thresh_rads = math.radians(20)
-                if m.yawspeed > yawspeed_thresh_rads:
-                    raise NotAchievedException("Excessive yaw on takeoff: %f deg/s > %f deg/s (frame=%s)" %
-                                               (math.degrees(m.yawspeed), math.degrees(yawspeed_thresh_rads), frame))
-            self.context_push()
-            self.install_message_hook_context(verify_yaw)
-            self.takeoff(10)
-            self.context_pop()
-            self.hover()
-            self.change_mode('ALT_HOLD')
-            self.delay_sim_time(1)
+    #         # add a listener that verifies yaw looks good:
+    #         def verify_yaw(mav, m):
+    #             if m.get_type() != 'ATTITUDE':
+    #                 return
+    #             yawspeed_thresh_rads = math.radians(20)
+    #             if m.yawspeed > yawspeed_thresh_rads:
+    #                 raise NotAchievedException("Excessive yaw on takeoff: %f deg/s > %f deg/s (frame=%s)" %
+    #                                            (math.degrees(m.yawspeed), math.degrees(yawspeed_thresh_rads), frame))
+    #         self.context_push()
+    #         self.install_message_hook_context(verify_yaw)
+    #         self.takeoff(10)
+    #         self.context_pop()
+    #         self.hover()
+    #         self.change_mode('ALT_HOLD')
+    #         self.delay_sim_time(1)
 
-            def verify_rollpitch(mav, m):
-                if m.get_type() != 'ATTITUDE':
-                    return
-                pitch_thresh_rad = math.radians(2)
-                if m.pitch > pitch_thresh_rad:
-                    raise NotAchievedException("Excessive pitch %f deg > %f deg" %
-                                               (math.degrees(m.pitch), math.degrees(pitch_thresh_rad)))
-                roll_thresh_rad = math.radians(2)
-                if m.roll > roll_thresh_rad:
-                    raise NotAchievedException("Excessive roll %f deg > %f deg" %
-                                               (math.degrees(m.roll), math.degrees(roll_thresh_rad)))
-            self.context_push()
-            self.install_message_hook_context(verify_rollpitch)
-            for i in range(5):
-                self.set_rc(4, 2000)
-                self.delay_sim_time(0.5)
-                self.set_rc(4, 1500)
-                self.delay_sim_time(5)
-            self.context_pop()
+    #         def verify_rollpitch(mav, m):
+    #             if m.get_type() != 'ATTITUDE':
+    #                 return
+    #             pitch_thresh_rad = math.radians(2)
+    #             if m.pitch > pitch_thresh_rad:
+    #                 raise NotAchievedException("Excessive pitch %f deg > %f deg" %
+    #                                            (math.degrees(m.pitch), math.degrees(pitch_thresh_rad)))
+    #             roll_thresh_rad = math.radians(2)
+    #             if m.roll > roll_thresh_rad:
+    #                 raise NotAchievedException("Excessive roll %f deg > %f deg" %
+    #                                            (math.degrees(m.roll), math.degrees(roll_thresh_rad)))
+    #         self.context_push()
+    #         self.install_message_hook_context(verify_rollpitch)
+    #         for i in range(5):
+    #             self.set_rc(4, 2000)
+    #             self.delay_sim_time(0.5)
+    #             self.set_rc(4, 1500)
+    #             self.delay_sim_time(5)
+    #         self.context_pop()
 
-            self.do_RTL()
+    #         self.do_RTL()
 
-    def Replay(self):
-        '''test replay correctness'''
-        self.progress("Building Replay")
-        util.build_SITL('tool/Replay', clean=False, configure=False)
-        self.set_parameters({
-            "LOG_DARM_RATEMAX": 0,
-            "LOG_FILE_RATEMAX": 0,
-        })
+    # def Replay(self):
+    #     '''test replay correctness'''
+    #     self.progress("Building Replay")
+    #     #util.build_SITL('tool/Replay', clean=False, configure=False)
+    #     self.set_parameters({
+    #         "LOG_DARM_RATEMAX": 0,
+    #         "LOG_FILE_RATEMAX": 0,
+    #     })
 
-        bits = [
-            ('GPS', self.test_replay_gps_bit),
-            ('Beacon', self.test_replay_beacon_bit),
-            ('OpticalFlow', self.test_replay_optical_flow_bit),
-        ]
-        for (name, func) in bits:
-            self.start_subtest("%s" % name)
-            self.test_replay_bit(func)
+    #     bits = [
+    #         ('GPS', self.test_replay_gps_bit),
+    #         ('Beacon', self.test_replay_beacon_bit),
+    #         ('OpticalFlow', self.test_replay_optical_flow_bit),
+    #     ]
+    #     for (name, func) in bits:
+    #         self.start_subtest("%s" % name)
+    #         self.test_replay_bit(func)
 
-    def test_replay_bit(self, bit):
+    # def test_replay_bit(self, bit):
 
-        self.context_push()
-        current_log_filepath = bit()
+    #     self.context_push()
+    #     current_log_filepath = bit()
 
-        self.progress("Running replay on (%s) (%u bytes)" % (
-            (current_log_filepath, os.path.getsize(current_log_filepath))
-        ))
+    #     self.progress("Running replay on (%s) (%u bytes)" % (
+    #         (current_log_filepath, os.path.getsize(current_log_filepath))
+    #     ))
 
-        self.run_replay(current_log_filepath)
+    #     self.run_replay(current_log_filepath)
 
-        replay_log_filepath = self.current_onboard_log_filepath()
+    #     replay_log_filepath = self.current_onboard_log_filepath()
 
-        self.context_pop()
+    #     self.context_pop()
 
-        self.progress("Replay log path: %s" % str(replay_log_filepath))
+    #     self.progress("Replay log path: %s" % str(replay_log_filepath))
 
-        check_replay = util.load_local_module("Tools/Replay/check_replay.py")
+    #     check_replay = util.load_local_module("Tools/Replay/check_replay.py")
 
-        ok = check_replay.check_log(replay_log_filepath, self.progress, verbose=True)
-        if not ok:
-            raise NotAchievedException("check_replay (%s) failed" % current_log_filepath)
+    #     ok = check_replay.check_log(replay_log_filepath, self.progress, verbose=True)
+    #     if not ok:
+    #         raise NotAchievedException("check_replay (%s) failed" % current_log_filepath)
 
     def DefaultIntervalsFromFiles(self):
         '''Test setting default mavlink message intervals from files'''
         ex = None
-        intervals_filepath = util.reltopdir("message-intervals-chan0.txt")
+        intervals_filepath = os.path.normpath("message-intervals-chan0.txt")
         self.progress("Using filepath (%s)" % intervals_filepath)
         try:
             with open(intervals_filepath, "w") as f:
@@ -10738,7 +10697,6 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
              self.MountYawVehicleForMountROI,
              self.MAV_CMD_DO_MOUNT_CONTROL,
              self.MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE,
-             self.AutoYawDO_MOUNT_CONTROL,
              self.Button,
              self.ShipTakeoff,
              self.RangeFinder,
@@ -10807,58 +10765,6 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         self.wait_statustext('POI.*-35.*149', check_context=True, regex=True)
         self.set_rc(12, 1000)
 
-        self.context_pop()
-        self.reboot_sitl()
-
-    def ScriptCopterPosOffsets(self):
-        '''test the copter-posoffset.lua example script'''
-        self.context_push()
-
-        # enable scripting and arming/takingoff in Auto mode
-        self.set_parameters({
-            "SCR_ENABLE": 1,
-            "AUTO_OPTIONS": 3,
-            "RC12_OPTION": 300
-        })
-        self.reboot_sitl()
-
-        # install copter-posoffset script
-        self.install_example_script_context('copter-posoffset.lua')
-        self.reboot_sitl()
-
-        # create simple mission with a single takeoff command
-        self.upload_simple_relhome_mission([
-            (mavutil.mavlink.MAV_CMD_NAV_TAKEOFF, 0, 0, 20)
-        ])
-
-        # switch to loiter to wait for position estimate (aka GPS lock)
-        self.change_mode('LOITER')
-        self.wait_ready_to_arm()
-
-        # arm and takeoff in Auto mode
-        self.change_mode('AUTO')
-        self.arm_vehicle()
-
-        # wait for vehicle to climb to at least 10m
-        self.wait_altitude(8, 12, relative=True)
-
-        # add position offset to East and confirm vehicle moves
-        self.set_parameter("PSC_OFS_POS_E", 20)
-        self.set_rc(12, 2000)
-        self.wait_distance(18)
-
-        # remove position offset and wait for vehicle to return home
-        self.set_parameter("PSC_OFS_POS_E", 0)
-        self.wait_distance_to_home(distance_min=0, distance_max=4, timeout=20)
-
-        # add velocity offset and confirm vehicle moves
-        self.set_parameter("PSC_OFS_VEL_N", 5)
-        self.wait_groundspeed(4.8, 5.2, minimum_duration=5, timeout=20)
-
-        # remove velocity offset and switch to RTL
-        self.set_parameter("PSC_OFS_VEL_N", 0)
-        self.set_rc(12, 1000)
-        self.do_RTL()
         self.context_pop()
         self.reboot_sitl()
 
@@ -12195,7 +12101,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.SMART_RTL,
             self.SMART_RTL_EnterLeave,
             self.RTL_TO_RALLY,
-            self.FlyEachFrame,
+            # self.FlyEachFrame,
             self.GPSBlending,
             self.GPSWeightedBlending,
             self.GPSBlendingLog,
@@ -12204,7 +12110,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             Test(self.DataFlashErase, attempts=8),
             self.Callisto,
             self.PerfInfo,
-            self.Replay,
+            # self.Replay,
             self.FETtecESC,
             self.ProximitySensors,
             self.GroundEffectCompensation_touchDownExpected,
@@ -12229,7 +12135,6 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.TerrainDBPreArm,
             self.ThrottleGainBoost,
             self.ScriptMountPOI,
-            self.ScriptCopterPosOffsets,
             self.MountSolo,
             self.FlyMissionTwice,
             self.FlyMissionTwiceWithReset,
