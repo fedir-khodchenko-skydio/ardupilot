@@ -11273,7 +11273,7 @@ class TestSuite(ABC):
             raise ValueError("Zero interval is infinite rate")
         return 1000000.0 / float(interval)
 
-    def set_message_rate_hz(self, id, rate_hz, mav=None, run_cmd=None):
+    def set_message_rate_hz(self, id, rate_hz, mav=None, run_cmd=None, compid=0):
         """set a message rate in Hz; 0 for original, -1 to disable"""
         if run_cmd is None:
             run_cmd = self.run_cmd
@@ -11287,6 +11287,7 @@ class TestSuite(ABC):
             mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
             p1=id,
             p2=set_interval,
+            target_compid=compid,
             mav=mav,
         )
 
